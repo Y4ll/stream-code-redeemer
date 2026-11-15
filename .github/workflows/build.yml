@@ -57,10 +57,20 @@ jobs:
           with open("installer/icon.ico","wb") as f: f.write(ico)
           print("Icon created.")
 
-      # 5. Compilar con PyInstaller
+      # 5. Compilar con PyInstaller (GUI como entry point)
       - name: Build with PyInstaller
         run: |
-          pyinstaller bot.spec --noconfirm
+          pyinstaller --noconfirm --onedir --windowed `
+            --name StreamCodeRedeemer `
+            --icon installer/icon.ico `
+            --hidden-import webview `
+            --hidden-import webview.platforms.winforms `
+            --hidden-import clr `
+            --collect-all webview `
+            --hidden-import easyocr `
+            --hidden-import cv2 `
+            --hidden-import requests `
+            gui.py
 
       # 6. Instalar Inno Setup
       - name: Install Inno Setup
