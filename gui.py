@@ -124,6 +124,7 @@ class BotAPI:
         self._test_mode = test_mode
         self._opts      = opts or {}
         self._creds     = (psn_npsso, xbox_token)
+        self._real_redeem = bool((opts or {}).get("realRedeem", ENABLE_REAL_REDEEM))
         self._thread    = threading.Thread(
             target=self._run,
             args=(stream_url, psn_npsso, xbox_token, test_mode),
@@ -299,7 +300,7 @@ class BotAPI:
             time.sleep(0.4)
             r      = random.random()
             status = "redeemed" if r < 0.70 else ("already_taken" if r < 0.90 else "failed")
-        elif not ENABLE_REAL_REDEEM:
+        elif not self._real_redeem:
             status = "dry_run"
         elif platform == "psn" and psn_npsso:
             status = self._redeem_psn(code, psn_npsso)
@@ -472,6 +473,7 @@ HTML = """<!DOCTYPE html>
       <div class="toggle-row"><input type="checkbox" id="src-voice" checked><label style="margin:0">Voz (audio)</label></div>
       <div class="toggle-row"><input type="checkbox" id="src-chat" checked><label style="margin:0">Chat</label></div>
       <div class="toggle-row"><input type="checkbox" id="src-desc" checked><label style="margin:0">Descripción (YouTube)</label></div>
+      <div class="toggle-row"><input type="checkbox" id="real-redeem" onchange="confirmReal(this)"><label style="margin:0;color:#ef4444">Canje real PSN/Xbox (riesgo de ban)</label></div>
       <label>YouTube API key (chat y descripción de YouTube)</label>
       <input id="yt-key" type="password" placeholder="AIza..." />
     </div>
@@ -570,8 +572,16 @@ HTML = """<!DOCTYPE html>
       chat:  document.getElementById('src-chat').checked,
       desc:  document.getElementById('src-desc').checked,
       ytKey: document.getElementById('yt-key').value.trim(),
+      realRedeem: document.getElementById('real-redeem').checked,
     };
     await pywebview.api.start_bot(url, npsso, xbox, test, opts);
+  }
+
+  function confirmReal(box) {
+    if (box.checked) {
+      const ok = confirm('El canje real envía códigos a tu cuenta de PlayStation/Xbox usando endpoints no oficiales. Sony y Microsoft prohíben la automatización y podrían bloquear tu cuenta. ¿Continuar?');
+      if (!ok) box.checked = false;
+    }
   }
 
   async function stopBot() {
