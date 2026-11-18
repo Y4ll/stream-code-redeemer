@@ -72,6 +72,9 @@ jobs:
             --hidden-import requests `
             --hidden-import streamlink `
             --hidden-import yt_dlp `
+            --hidden-import faster_whisper `
+            --hidden-import av `
+            --hidden-import sources `
             --collect-all yt_dlp `
             gui.py
 

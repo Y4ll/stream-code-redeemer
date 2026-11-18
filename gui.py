@@ -16,8 +16,17 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from sources import (
+    find_codes, audio_loop, twitch_chat, youtube_chat,
+    youtube_description, youtube_video_id, twitch_channel,
+)
+
 # ─── Base de datos ───────────────────────────────────────────────────────────
 DB_PATH = Path("codes.db")
+
+# El canje real contra PSN/Xbox está desactivado por defecto.
+# Para activarlo: variable de entorno ENABLE_REAL_REDEEM=1
+ENABLE_REAL_REDEEM = os.getenv("ENABLE_REAL_REDEEM") == "1"
 
 def init_db():
     con = sqlite3.connect(DB_PATH)
@@ -108,11 +117,13 @@ class BotAPI:
         self._emit("stats", get_stats())
 
     # ── Métodos llamados desde JS ─────────────────────────────────────────────
-    def start_bot(self, stream_url, psn_npsso, xbox_token, test_mode):
+    def start_bot(self, stream_url, psn_npsso, xbox_token, test_mode, opts=None):
         if self._running:
             return {"ok": False, "msg": "Ya está corriendo"}
         self._running   = True
         self._test_mode = test_mode
+        self._opts      = opts or {}
+        self._creds     = (psn_npsso, xbox_token)
         self._thread    = threading.Thread(
             target=self._run,
             args=(stream_url, psn_npsso, xbox_token, test_mode),
@@ -196,6 +207,45 @@ class BotAPI:
 
         return None
 
+    def _start_sources(self, stream_url, media_url):
+        """Lanza hilos para voz, chat y descripción según las opciones marcadas."""
+        opts = self._opts
+        psn, xbox = self._creds
+        should_run = lambda: self._running
+
+        def emit(text):
+            for code, platform in find_codes(text):
+                self._process_code(code, platform, psn_npsso=psn, xbox_token=xbox)
+
+        def run(name, fn, *args):
+            try:
+                self._log("info", f"🎧 Fuente activa: {name}")
+                fn(*args)
+            except Exception as e:
+                self._log("error", f"❌ {name}: {e}")
+
+        def start(name, fn, *args):
+            threading.Thread(target=run, args=(name, fn, *args), daemon=True).start()
+
+        vid = youtube_video_id(stream_url)
+        channel = twitch_channel(stream_url)
+        ykey = opts.get("ytKey", "")
+
+        if opts.get("voice"):
+            start("voz (audio)", audio_loop, media_url, emit, should_run)
+        if opts.get("chat"):
+            if channel:
+                start("chat de Twitch", twitch_chat, channel, emit, should_run)
+            elif vid and ykey:
+                start("chat de YouTube", youtube_chat, vid, ykey, emit, should_run)
+            else:
+                self._log("warn", "⚠ Chat: en YouTube necesitas API key")
+        if opts.get("desc"):
+            if vid and ykey:
+                start("descripción de YouTube", youtube_description, vid, ykey, emit, should_run)
+            else:
+                self._log("warn", "⚠ Descripción: solo funciona con YouTube y API key")
+
     def _run_real(self, stream_url, psn_npsso, xbox_token):
         """Lee el stream real (Twitch o YouTube) con OpenCV + EasyOCR."""
         try:
@@ -208,6 +258,7 @@ class BotAPI:
             if not cap.isOpened():
                 self._log("error", "❌ No se pudo abrir el stream"); return
             self._log("info", "✅ Stream conectado")
+            self._start_sources(stream_url, url)
 
             try:
                 import easyocr
@@ -248,6 +299,8 @@ class BotAPI:
             time.sleep(0.4)
             r      = random.random()
             status = "redeemed" if r < 0.70 else ("already_taken" if r < 0.90 else "failed")
+        elif not ENABLE_REAL_REDEEM:
+            status = "dry_run"
         elif platform == "psn" and psn_npsso:
             status = self._redeem_psn(code, psn_npsso)
         elif platform == "xbox" and xbox_token:
@@ -262,6 +315,8 @@ class BotAPI:
             self._log("ok", f"✅ Canjeado: {code}  →  {reward}", code=code, platform=platform)
         elif status == "already_taken":
             self._log("error", f"❌ Ya canjeado por otro: {code}", code=code, platform=platform)
+        elif status == "dry_run":
+            self._log("warn", f"🧪 Detectado, canje real desactivado: {code}", code=code, platform=platform)
         elif status == "no_credentials":
             self._log("warn", f"⚠ Sin credenciales para {platform.upper()}", code=code, platform=platform)
         else:
@@ -412,6 +467,13 @@ HTML = """<!DOCTYPE html>
         <input type="checkbox" id="test-mode" checked>
         <label style="margin:0">Modo prueba (sin stream real)</label>
       </div>
+
+      <h3 style="margin-top:14px">Fuentes (stream real)</h3>
+      <div class="toggle-row"><input type="checkbox" id="src-voice" checked><label style="margin:0">Voz (audio)</label></div>
+      <div class="toggle-row"><input type="checkbox" id="src-chat" checked><label style="margin:0">Chat</label></div>
+      <div class="toggle-row"><input type="checkbox" id="src-desc" checked><label style="margin:0">Descripción (YouTube)</label></div>
+      <label>YouTube API key (chat y descripción de YouTube)</label>
+      <input id="yt-key" type="password" placeholder="AIza..." />
     </div>
 
     <div class="section">
@@ -503,7 +565,13 @@ HTML = """<!DOCTYPE html>
     const xbox  = document.getElementById('xbox-token').value.trim();
     const test  = document.getElementById('test-mode').checked;
     if (!test && !url) { alert('Ingresa la URL del stream.'); return; }
-    await pywebview.api.start_bot(url, npsso, xbox, test);
+    const opts = {
+      voice: document.getElementById('src-voice').checked,
+      chat:  document.getElementById('src-chat').checked,
+      desc:  document.getElementById('src-desc').checked,
+      ytKey: document.getElementById('yt-key').value.trim(),
+    };
+    await pywebview.api.start_bot(url, npsso, xbox, test, opts);
   }
 
   async function stopBot() {
