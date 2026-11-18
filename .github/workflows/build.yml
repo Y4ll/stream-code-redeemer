@@ -30,6 +30,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller
           pip install -r requirements.txt
+          # YouTube cambia seguido: siempre empaquetar las últimas versiones
+          pip install -U yt-dlp streamlink
 
       # 4. Generar un icono placeholder si no existe
       - name: Create placeholder icon

@@ -194,19 +194,46 @@ class BotAPI:
         except Exception as e:
             self._log("warn", f"streamlink no pudo resolver el stream: {e}")
 
-        # 2) yt-dlp (API Python) — respaldo, mejor para YouTube
+        # 2) yt-dlp (API Python) — respaldo, mejor para YouTube.
+        # No se fuerza un formato: en lives de YouTube "best" suele no existir
+        # ("Requested format is not available"), así que se extraen todos los
+        # formatos y se elige el mejor con video.
         try:
             import yt_dlp
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "format": "best"}) as ydl:
+            opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "ignore_no_formats_error": True,
+                "noplaylist": True,
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(stream_url, download=False)
-                url = info.get("url", "")
-                if url.startswith("http"):
-                    self._log("info", "ℹ️ URL obtenida con yt-dlp")
-                    return url
+            url = self._pick_ytdlp_url(info)
+            if url:
+                self._log("info", "ℹ️ URL obtenida con yt-dlp")
+                return url
+            self._log("warn", "yt-dlp no encontró formatos de video (¿el stream sigue en vivo?)")
         except Exception as e:
             self._log("warn", f"yt-dlp no pudo resolver el stream: {e}")
 
         return None
+
+    @staticmethod
+    def _pick_ytdlp_url(info):
+        """Devuelve la mejor URL de video de un resultado de yt-dlp, o None."""
+        if not info:
+            return None
+        url = info.get("url", "")
+        if url.startswith("http"):
+            return url
+        formats = [f for f in (info.get("formats") or [])
+                   if str(f.get("url", "")).startswith("http")]
+        with_video = [f for f in formats if f.get("vcodec") not in (None, "none")]
+        pool = with_video or formats
+        if not pool:
+            return None
+        best = max(pool, key=lambda f: (f.get("height") or 0, f.get("tbr") or 0))
+        return best["url"]
 
     def _start_sources(self, stream_url, media_url):
         """Lanza hilos para voz, chat y descripción según las opciones marcadas."""
