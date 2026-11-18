@@ -167,18 +167,42 @@ class BotAPI:
                 next_code_at = time.time() + random.uniform(6, 12)
             time.sleep(0.5)
 
-    def _run_real(self, stream_url, psn_npsso, xbox_token):
-        """Lee el stream real con streamlink + OpenCV + EasyOCR."""
+    def _resolve_stream_url(self, stream_url):
+        """Obtiene la URL directa de video. Soporta Twitch, YouTube y otros.
+        Prueba streamlink primero y, si falla, yt-dlp (mejor soporte de YouTube)."""
+        platform = "YouTube" if ("youtube.com" in stream_url or "youtu.be" in stream_url) else "Twitch/otro"
+        self._log("info", f"🔗 Conectando a {platform}: {stream_url}")
+
+        # 1) streamlink (API Python, funciona dentro del .exe)
         try:
-            import subprocess, cv2
-            self._log("info", f"🔗 Conectando a {stream_url}…")
-            result = subprocess.run(
-                ["streamlink","--stream-url", stream_url, "best"],
-                capture_output=True, text=True, timeout=20,
-            )
-            url = result.stdout.strip()
-            if not url.startswith("http"):
-                self._log("error", "❌ No se pudo obtener URL del stream")
+            import streamlink
+            streams = streamlink.Streamlink().streams(stream_url)
+            if streams and "best" in streams:
+                return streams["best"].to_url()
+        except Exception as e:
+            self._log("warn", f"streamlink no pudo resolver el stream: {e}")
+
+        # 2) yt-dlp (API Python) — respaldo, mejor para YouTube
+        try:
+            import yt_dlp
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "format": "best"}) as ydl:
+                info = ydl.extract_info(stream_url, download=False)
+                url = info.get("url", "")
+                if url.startswith("http"):
+                    self._log("info", "ℹ️ URL obtenida con yt-dlp")
+                    return url
+        except Exception as e:
+            self._log("warn", f"yt-dlp no pudo resolver el stream: {e}")
+
+        return None
+
+    def _run_real(self, stream_url, psn_npsso, xbox_token):
+        """Lee el stream real (Twitch o YouTube) con OpenCV + EasyOCR."""
+        try:
+            import cv2
+            url = self._resolve_stream_url(stream_url)
+            if not url:
+                self._log("error", "❌ No se pudo obtener la URL del stream. ¿Está en vivo?")
                 return
             cap = cv2.VideoCapture(url)
             if not cap.isOpened():
@@ -382,7 +406,7 @@ HTML = """<!DOCTYPE html>
     <div class="section">
       <h3>Stream</h3>
       <label>URL del canal</label>
-      <input id="url" type="text" placeholder="https://www.twitch.tv/canal" />
+      <input id="url" type="text" placeholder="Twitch o YouTube: https://www.youtube.com/watch?v=..." />
 
       <div class="toggle-row">
         <input type="checkbox" id="test-mode" checked>
