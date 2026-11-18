@@ -78,6 +78,11 @@ jobs:
             --hidden-import av `
             --hidden-import sources `
             --collect-all yt_dlp `
+            --hidden-import torch `
+            --hidden-import torchvision `
+            --collect-all torch `
+            --collect-all torchvision `
+            --collect-all easyocr `
             gui.py
 
       # 6. Instalar Inno Setup
